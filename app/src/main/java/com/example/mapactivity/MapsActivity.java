@@ -7,24 +7,18 @@ import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 
 import android.Manifest;
-import android.annotation.TargetApi;
-import android.app.AlertDialog;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
 import android.location.LocationManager;
-import android.net.Uri;
+import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.util.Log;
-import android.view.WindowManager;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -72,6 +66,10 @@ public class MapsActivity extends FragmentActivity
     private double desLat;
     private double desLon;
     private String desTitle;
+    private double currLat;
+    private double currLon;
+
+    private boolean arrive = false;
 
     LocationRequest locationRequest = new LocationRequest()
             .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY)
@@ -115,7 +113,7 @@ public class MapsActivity extends FragmentActivity
 
         // 현재 위치
         mMap.getUiSettings().setMyLocationButtonEnabled(true);
-        mMap.animateCamera(CameraUpdateFactory.zoomTo(15));
+        mMap.animateCamera(CameraUpdateFactory.zoomTo(14));
         mMap.setOnMyLocationButtonClickListener(new GoogleMap.OnMyLocationButtonClickListener() {
             @Override
             public boolean onMyLocationButtonClick() {
@@ -137,7 +135,6 @@ public class MapsActivity extends FragmentActivity
 
         // 목적지 마커
         getMarkerItems(desLat, desLon, desTitle);
-
     }
 
     @Override
@@ -147,6 +144,18 @@ public class MapsActivity extends FragmentActivity
         if (mGoogleApiClient.isConnected()) {
             Log.d(TAG, "onResume : call startLocationUpdates");
             if (!mRequestingLocationUpdates) startLocationUpdates();
+        }
+
+        if(arrive) {
+            MediaPlayer alarm = MediaPlayer.create(MapsActivity.this, R.raw.bgm);
+            alarm.start();
+            alarm.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+                @Override
+                public void onCompletion(MediaPlayer mediaPlayer) {
+                    mediaPlayer.stop();
+                    mediaPlayer.release();
+                }
+            });
         }
     }
 
@@ -190,6 +199,8 @@ public class MapsActivity extends FragmentActivity
         MarkerOptions markerOptions = new MarkerOptions();
         markerOptions.title(title);
         markerOptions.position(position);
+        markerOptions.snippet("위도:" + position.latitude
+                + " 경도:" + position.longitude);
         markerOptions.icon(BitmapDescriptorFactory.fromBitmap(marker));
 
         // 목적지 마커로 ZOOM 설정
@@ -199,6 +210,7 @@ public class MapsActivity extends FragmentActivity
         return mMap.addMarker(markerOptions);
     }
 
+    // 목적지 마커 추가
     private void getMarkerItems(double lat, double lon, String title) {
         ArrayList<MarkerDTO> markerList = new ArrayList<>();
 
@@ -260,8 +272,11 @@ public class MapsActivity extends FragmentActivity
         currentPosition
                 = new LatLng( location.getLatitude(), location.getLongitude());
 
+        currLat = currentPosition.latitude;
+        currLon = currentPosition.longitude;
 
-        Log.d(TAG, "onLocationChanged : ");
+        Log.d("onLocationChanged!", "longitude : " + currLat + " longitude : " + currLon);
+
 
         String markerTitle = getCurrentAddress(currentPosition);
         String markerSnippet = "위도:" + String.valueOf(location.getLatitude())
@@ -270,8 +285,27 @@ public class MapsActivity extends FragmentActivity
         //현재 위치에 마커 생성하고 이동
         setCurrentLocation(location, markerTitle, markerSnippet);
 
+        compareLocation();
+
         mCurrentLocatiion = location;
     }
+
+    private void compareLocation() {
+        // 현재 위도, 경도와 목적지 위도 경도 비교
+        if(((desLat + 0.005) > currLat) && ((desLat - 0.005) < currLat)
+                && ((desLon + 0.005) > currLon) && ((desLon - 0.005) < currLon)) {
+            Toast.makeText(MapsActivity.this, "도착!!", Toast.LENGTH_SHORT).show();
+
+            arrive = true;
+        }
+
+        else {
+            Log.d("Remaining distance", Math.abs(desLat - currLat) + " | " + Math.abs(desLon - currLon));
+            arrive = false;
+        }
+    }
+
+
 
     public String getCurrentAddress(LatLng latlng) {
         //지오코더 GPS를 주소로 변환

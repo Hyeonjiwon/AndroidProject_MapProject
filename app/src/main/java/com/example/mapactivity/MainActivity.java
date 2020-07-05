@@ -4,9 +4,11 @@ import androidx.annotation.MainThread;
 import androidx.appcompat.app.AppCompatActivity;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.location.Address;
 import android.location.Geocoder;
+import android.media.MediaPlayer;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -80,6 +82,20 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+
+        /*
+        MediaPlayer m = MediaPlayer.create(c , R.raw.bgm);
+
+        m.start();
+        m.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+            @Override
+            public void onCompletion(MediaPlayer mp)
+            {
+                mp.stop();
+                mp.release();
+            }
+        });
+        */
     }
 
     PermissionListener permissionlistener = new PermissionListener() {
