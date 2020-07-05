@@ -3,19 +3,24 @@ package com.example.mapactivity;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentActivity;
 
 import android.Manifest;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.drawable.BitmapDrawable;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
 import android.location.LocationManager;
-import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -31,7 +36,6 @@ import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
-import com.google.android.gms.maps.model.BitmapDescriptor;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.Marker;
@@ -53,14 +57,14 @@ public class MapsActivity extends FragmentActivity
 
     private static final String TAG = "googlemap";
     private static final int PERMISSIONS_REQUEST_ACCESS_FINE_LOCATION = 2002;
-    private static final int UPDATE_INTERVAL_MS = 1000;  // 1초
-    private static final int FASTEST_UPDATE_INTERVAL_MS = 500; // 0.5초
+    private static final int UPDATE_INTERVAL_MS = 1000;  // 2초
+    private static final int FASTEST_UPDATE_INTERVAL_MS = 500; // 1초
 
     boolean mRequestingLocationUpdates = false;
-    Location mCurrentLocatiion;
+    private Location mCurrentLocatiion;
     boolean mMoveMapByUser = true;
     boolean mMoveMapByAPI = true;
-    LatLng currentPosition;
+    private LatLng currentPosition;
     private Marker currentMarker = null;
 
     private double desLat;
@@ -69,7 +73,11 @@ public class MapsActivity extends FragmentActivity
     private double currLat;
     private double currLon;
 
-    private boolean arrive = false;
+    private NotificationManager notificationManager;
+    private NotificationCompat.Builder mBuilder;
+    private String CHANNEL_ID = "my_channel_01";
+    private CharSequence name = "my_channel";
+    private String Description = "This is my channel";
 
     LocationRequest locationRequest = new LocationRequest()
             .setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY)
@@ -87,15 +95,52 @@ public class MapsActivity extends FragmentActivity
         desLon = secondIntent.getDoubleExtra("lon", 0);
         desTitle = secondIntent.getStringExtra("title");
 
+        // google aip client 생성
         mGoogleApiClient = new GoogleApiClient.Builder(this)
                 .addConnectionCallbacks(this)
                 .addOnConnectionFailedListener(this)
                 .addApi(LocationServices.API)
                 .build();
 
+        notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        // 푸시 알람 채널 생성
+        createNotificationChannel();
+
+        // 푸시 알람 설정
+        mBuilder =
+                new NotificationCompat.Builder(MapsActivity.this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle("도착 알림")
+                .setContentText(desTitle + "에 도착하였습니다!")
+                .setDefaults(Notification.DEFAULT_VIBRATE)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(MapsActivity.this, 0,
+                        new Intent(getApplicationContext(), MapsActivity.class),
+                        PendingIntent.FLAG_CANCEL_CURRENT
+                        ));
+
         SupportMapFragment mapFragment = (SupportMapFragment) getSupportFragmentManager()
                 .findFragmentById(R.id.map);
+
         mapFragment.getMapAsync(this);
+    }
+
+    // 푸시 알림 채널 생성 메소드
+    private void createNotificationChannel() {
+        // Create the NotificationChannel, but only on API 26+ because
+        // the NotificationChannel class is new and not in the support library
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            int importance = NotificationManager.IMPORTANCE_HIGH;
+            NotificationChannel mChannel = new NotificationChannel(CHANNEL_ID, name, importance);
+            mChannel.setDescription(Description);
+            mChannel.enableLights(true);
+            mChannel.setLightColor(Color.RED);
+            mChannel.enableVibration(true);
+            mChannel.setVibrationPattern(new long[]{100, 200, 300, 400, 500, 400, 300, 200, 400});
+            mChannel.setShowBadge(false);
+            notificationManager.createNotificationChannel(mChannel);
+        }
     }
 
     /**
@@ -111,9 +156,10 @@ public class MapsActivity extends FragmentActivity
     public void onMapReady(GoogleMap googleMap) {
         mMap = googleMap;
 
-        // 현재 위치
+        // 현재 위치로 카메라 이동
         mMap.getUiSettings().setMyLocationButtonEnabled(true);
-        mMap.animateCamera(CameraUpdateFactory.zoomTo(14));
+        mMap.animateCamera(CameraUpdateFactory.zoomTo(10));
+
         mMap.setOnMyLocationButtonClickListener(new GoogleMap.OnMyLocationButtonClickListener() {
             @Override
             public boolean onMyLocationButtonClick() {
@@ -134,38 +180,24 @@ public class MapsActivity extends FragmentActivity
         });
 
         // 목적지 마커
-        getMarkerItems(desLat, desLon, desTitle);
+        getDesMarkerItems(desLat, desLon, desTitle);
     }
 
     @Override
     public void onResume() {
         super.onResume();
-
         if (mGoogleApiClient.isConnected()) {
             Log.d(TAG, "onResume : call startLocationUpdates");
             if (!mRequestingLocationUpdates) startLocationUpdates();
-        }
-
-        if(arrive) {
-            MediaPlayer alarm = MediaPlayer.create(MapsActivity.this, R.raw.bgm);
-            alarm.start();
-            alarm.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
-                @Override
-                public void onCompletion(MediaPlayer mediaPlayer) {
-                    mediaPlayer.stop();
-                    mediaPlayer.release();
-                }
-            });
         }
     }
 
     private void startLocationUpdates() {
         if (!checkLocationServicesStatus()) {
-
             Log.d(TAG, "startLocationUpdates : call showDialogForLocationServiceSetting");
-            //showDialogForLocationServiceSetting();
-        }else {
+        }
 
+        else {
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED
                     && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                 Log.d(TAG, "startLocationUpdates : 권한없음");
@@ -173,6 +205,8 @@ public class MapsActivity extends FragmentActivity
             }
 
             Log.d(TAG, "startLocationUpdates : call FusedLocationApi.requestLocationUpdates");
+
+            // 위치 업데이터 메소드 호출
             LocationServices.FusedLocationApi.requestLocationUpdates(mGoogleApiClient, locationRequest, this);
             mRequestingLocationUpdates = true;
 
@@ -186,11 +220,109 @@ public class MapsActivity extends FragmentActivity
         mRequestingLocationUpdates = false;
     }
 
+    @Override
+    public void onLocationChanged(Location location) {
+        currentPosition
+                = new LatLng(location.getLatitude(), location.getLongitude());
+
+        currLat = currentPosition.latitude;
+        currLon = currentPosition.longitude;
+
+        Log.d("onLocationChanged!", "longitude : " + currLat + " longitude : " + currLon);
+
+
+        String markerTitle = getCurrentAddress(currentPosition);
+        String markerSnippet = "위도:" + String.valueOf(location.getLatitude())
+                + " 경도:" + String.valueOf(location.getLongitude());
+
+        //현재 위치에 마커 생성하고 이동
+        setCurrentLocation(location, markerTitle, markerSnippet);
+
+        // 목적지 위치와 현 위치 비교 메소드 호출
+        compareLocation();
+
+        mCurrentLocatiion = location;
+    }
+
+    // 목적지 위치와 현 위치 비교 메소드
+    private void compareLocation() {
+        // 현재 위도, 경도와 목적지 위도 경도 비교
+        // 목적지 범위 안에 들어왔으면
+        if(((desLat + 0.005) > currLat) && ((desLat - 0.005) < currLat)
+                && ((desLon + 0.005) > currLon) && ((desLon - 0.005) < currLon)) {
+
+            // 토스트메시지를 띄워주고
+            Toast.makeText(MapsActivity.this, "도착하였습니다!", Toast.LENGTH_SHORT).show();
+
+            Log.d("Alarm", "Alarm start");
+            // 알림 호출
+            notificationManager.notify(0, mBuilder.build());
+        }
+
+        else {
+            Log.d("Remaining distance", Math.abs(desLat - currLat) + " | " + Math.abs(desLon - currLon));
+        }
+    }
+
+    public String getCurrentAddress(LatLng latlng) {
+        //지오코더 GPS를 주소로 변환
+        Geocoder geocoder = new Geocoder(this, Locale.getDefault());
+
+        List<Address> addresses;
+
+        try {
+            addresses = geocoder.getFromLocation(
+                    latlng.latitude,
+                    latlng.longitude,
+                    1);
+
+        } catch (IOException ioException) {
+            //네트워크 문제
+            Toast.makeText(this, "지오코더 서비스 사용불가", Toast.LENGTH_LONG).show();
+            return "지오코더 서비스 사용불가";
+        } catch (IllegalArgumentException illegalArgumentException) {
+            Toast.makeText(this, "잘못된 GPS 좌표", Toast.LENGTH_LONG).show();
+            return "잘못된 GPS 좌표";
+        }
+
+        if (addresses == null || addresses.size() == 0) {
+            return "주소 미발견";
+
+        } else {
+            Address address = addresses.get(0);
+            return address.getAddressLine(0).toString();
+        }
+    }
+
+    public void setCurrentLocation(Location location, String markerTitle, String markerSnippet) {
+        mMoveMapByUser = false;
+
+        if (currentMarker != null) currentMarker.remove();
+
+        LatLng currentLatLng = new LatLng(location.getLatitude(), location.getLongitude());
+        MarkerOptions markerOptions = new MarkerOptions();
+        markerOptions.position(currentLatLng);
+        markerOptions.title(markerTitle);
+        markerOptions.snippet(markerSnippet);
+        markerOptions.draggable(true);
+
+        currentMarker = mMap.addMarker(markerOptions);
+
+        if ( mMoveMapByAPI ) {
+            Log.d( TAG, "setCurrentLocation :  mGoogleMap moveCamera "
+                    + location.getLatitude() + " " + location.getLongitude() ) ;
+            // CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLngZoom(currentLatLng, 15);
+            CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLng(currentLatLng);
+            mMap.moveCamera(cameraUpdate);
+        }
+    }
+
     // addMarker 커스텀 정의
-    public Marker addMarker(MarkerDTO markerDTO) {
+    public Marker addDesMarker(MarkerDTO markerDTO) {
         LatLng position = new LatLng(markerDTO.getLatitude(), markerDTO.getLongitude());
         String title = markerDTO.getTitle();
 
+        // 마커 이미지 변경
         BitmapDrawable bm = (BitmapDrawable)getResources().getDrawable(R.drawable.placeholder);
         Bitmap b = bm.getBitmap();
         Bitmap marker = Bitmap.createScaledBitmap(b, 100, 100, false);
@@ -204,23 +336,54 @@ public class MapsActivity extends FragmentActivity
         markerOptions.icon(BitmapDescriptorFactory.fromBitmap(marker));
 
         // 목적지 마커로 ZOOM 설정
-        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(position, 15));
+        mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(position, 10));
         mMap.moveCamera(CameraUpdateFactory.newLatLng(position));
 
         return mMap.addMarker(markerOptions);
     }
 
     // 목적지 마커 추가
-    private void getMarkerItems(double lat, double lon, String title) {
+    private void getDesMarkerItems(double lat, double lon, String title) {
         ArrayList<MarkerDTO> markerList = new ArrayList<>();
 
         // 마커 추가
         markerList.add(new MarkerDTO(lat, lon, title));
 
         for (MarkerDTO markerDTO : markerList) {
-            // 마커 표시
-            addMarker(markerDTO);
+            addDesMarker(markerDTO);
         }
+    }
+
+    public boolean checkLocationServicesStatus() {
+        LocationManager locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
+
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+    }
+
+    @Override
+    protected void onStart() {
+        if(mGoogleApiClient != null && mGoogleApiClient.isConnected() == false){
+            Log.d(TAG, "onStart: mGoogleApiClient connect");
+            mGoogleApiClient.connect();
+
+        }
+        super.onStart();
+    }
+
+    @Override
+    protected void onStop() {
+        if (mRequestingLocationUpdates) {
+            Log.d(TAG, "onStop : call stopLocationUpdates");
+            stopLocationUpdates();
+        }
+
+        if ( mGoogleApiClient.isConnected()) {
+            Log.d(TAG, "onStop : mGoogleApiClient disconnect");
+            mGoogleApiClient.disconnect();
+        }
+
+        super.onStop();
     }
 
     @Override
@@ -264,131 +427,5 @@ public class MapsActivity extends FragmentActivity
     @Override
     public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
         Log.d(TAG, "onConnectionFailed");
-
-    }
-
-    @Override
-    public void onLocationChanged(Location location) {
-        currentPosition
-                = new LatLng( location.getLatitude(), location.getLongitude());
-
-        currLat = currentPosition.latitude;
-        currLon = currentPosition.longitude;
-
-        Log.d("onLocationChanged!", "longitude : " + currLat + " longitude : " + currLon);
-
-
-        String markerTitle = getCurrentAddress(currentPosition);
-        String markerSnippet = "위도:" + String.valueOf(location.getLatitude())
-                + " 경도:" + String.valueOf(location.getLongitude());
-
-        //현재 위치에 마커 생성하고 이동
-        setCurrentLocation(location, markerTitle, markerSnippet);
-
-        compareLocation();
-
-        mCurrentLocatiion = location;
-    }
-
-    private void compareLocation() {
-        // 현재 위도, 경도와 목적지 위도 경도 비교
-        if(((desLat + 0.005) > currLat) && ((desLat - 0.005) < currLat)
-                && ((desLon + 0.005) > currLon) && ((desLon - 0.005) < currLon)) {
-            Toast.makeText(MapsActivity.this, "도착!!", Toast.LENGTH_SHORT).show();
-
-            arrive = true;
-        }
-
-        else {
-            Log.d("Remaining distance", Math.abs(desLat - currLat) + " | " + Math.abs(desLon - currLon));
-            arrive = false;
-        }
-    }
-
-
-
-    public String getCurrentAddress(LatLng latlng) {
-        //지오코더 GPS를 주소로 변환
-        Geocoder geocoder = new Geocoder(this, Locale.getDefault());
-
-        List<Address> addresses;
-
-        try {
-            addresses = geocoder.getFromLocation(
-                    latlng.latitude,
-                    latlng.longitude,
-                    1);
-        } catch (IOException ioException) {
-            //네트워크 문제
-            Toast.makeText(this, "지오코더 서비스 사용불가", Toast.LENGTH_LONG).show();
-            return "지오코더 서비스 사용불가";
-        } catch (IllegalArgumentException illegalArgumentException) {
-            Toast.makeText(this, "잘못된 GPS 좌표", Toast.LENGTH_LONG).show();
-            return "잘못된 GPS 좌표";
-        }
-
-        if (addresses == null || addresses.size() == 0) {
-            Toast.makeText(this, "주소 미발견", Toast.LENGTH_LONG).show();
-            return "주소 미발견";
-
-        } else {
-            Address address = addresses.get(0);
-            return address.getAddressLine(0).toString();
-        }
-    }
-
-    public boolean checkLocationServicesStatus() {
-        LocationManager locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
-
-        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
-                || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
-    }
-
-
-    public void setCurrentLocation(Location location, String markerTitle, String markerSnippet) {
-        mMoveMapByUser = false;
-
-        if (currentMarker != null) currentMarker.remove();
-        
-        LatLng currentLatLng = new LatLng(location.getLatitude(), location.getLongitude());
-        MarkerOptions markerOptions = new MarkerOptions();
-        markerOptions.position(currentLatLng);
-        markerOptions.title(markerTitle);
-        markerOptions.snippet(markerSnippet);
-        markerOptions.draggable(true);
-        
-        currentMarker = mMap.addMarker(markerOptions);
-
-        if ( mMoveMapByAPI ) {
-            Log.d( TAG, "setCurrentLocation :  mGoogleMap moveCamera "
-                    + location.getLatitude() + " " + location.getLongitude() ) ;
-            // CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLngZoom(currentLatLng, 15);
-            CameraUpdate cameraUpdate = CameraUpdateFactory.newLatLng(currentLatLng);
-            mMap.moveCamera(cameraUpdate);
-        }
-    }
-
-    @Override
-    protected void onStart() {
-        if(mGoogleApiClient != null && mGoogleApiClient.isConnected() == false){
-            Log.d(TAG, "onStart: mGoogleApiClient connect");
-            mGoogleApiClient.connect();
-        }
-        super.onStart();
-    }
-
-    @Override
-    protected void onStop() {
-        if (mRequestingLocationUpdates) {
-            Log.d(TAG, "onStop : call stopLocationUpdates");
-            stopLocationUpdates();
-        }
-
-        if ( mGoogleApiClient.isConnected()) {
-            Log.d(TAG, "onStop : mGoogleApiClient disconnect");
-            mGoogleApiClient.disconnect();
-        }
-
-        super.onStop();
     }
 }
